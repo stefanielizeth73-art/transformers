@@ -281,7 +281,7 @@ class QianfanOCRForConditionalGeneration(InternVLForConditionalGeneration):
 
 
 class QianfanOCRProcessor(InternVLProcessor):
-    videos_kwargs = AttributeError()
+    skip_tensor_conversion = AttributeError()
 
     def __init__(
         self,
