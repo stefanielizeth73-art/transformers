@@ -287,6 +287,22 @@ class InternVLProcessorTest(ProcessorTesterMixin, unittest.TestCase):
         for prompt in continue_prompt:
             self.assertTrue(prompt.endswith("It is the sound of"))  # no `eos` token at the end
 
+    @require_torch
+    def test_batch_videos_with_different_frame_counts(self):
+        processor = self.get_processor()
+        text = f"{processor.video_token} Describe this clip."
+        videos = [
+            torch.full((count, 3, 20, 20), intensity, dtype=torch.uint8) for count, intensity in [(2, 0), (4, 255)]
+        ]
+        kwargs = {"do_sample_frames": False, "padding": True, "return_tensors": "pt"}
+
+        singles = [processor(text=text, videos=video, **kwargs) for video in videos]
+        batch = processor(text=[text, text], videos=videos, **kwargs)
+
+        torch.testing.assert_close(batch.pixel_values, torch.cat([sample.pixel_values for sample in singles]))
+        for ids, mask, sample in zip(batch.input_ids, batch.attention_mask, singles):
+            torch.testing.assert_close(ids[mask.bool()], sample.input_ids[0])
+
     @parameterized.expand([(1,), (2,)])
     @require_torch
     def test_frames_binding(self, batch_size: int):

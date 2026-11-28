@@ -33,9 +33,7 @@ class InternVLProcessor(ProcessorMixin):
     images_kwargs = {
         "crop_to_patches": True,
     }
-    videos_kwargs = {
-        "return_tensors": "pt",
-    }
+    skip_tensor_conversion = [*ProcessorMixin.skip_tensor_conversion, "pixel_values_videos"]
 
     def __init__(
         self,
@@ -92,6 +90,8 @@ class InternVLProcessor(ProcessorMixin):
             **kwargs,
         )
         return_tensors = output_kwargs["text_kwargs"].get("return_tensors")
+        # Keep each clip separate until its frames can be placed in prompt order.
+        output_kwargs["videos_kwargs"]["return_tensors"] = None
 
         # Keep track of how many image/videos per sample we have, and in which order
         text = [text] if isinstance(text, str) else text
@@ -105,9 +105,6 @@ class InternVLProcessor(ProcessorMixin):
             image_num_patches_indices = np.cumsum(num_patches)
         if videos is not None:
             video_pixel_values = model_inputs.pop("pixel_values_videos")
-            batch_size, num_frames, *_ = video_pixel_values.shape
-            video_pixel_values = video_pixel_values.flatten(0, 1)
-            video_patch_indices = np.arange(num_frames * batch_size + 1, step=num_frames)
 
         image_index = video_index = 0
         image_video_patches = []
@@ -118,14 +115,14 @@ class InternVLProcessor(ProcessorMixin):
                 image_video_patches.append(model_inputs["pixel_values"][start_index:end_index])
                 image_index += 1
             else:
-                start_index = video_patch_indices[video_index]
-                end_index = video_patch_indices[video_index + 1]
-                image_video_patches.append(video_pixel_values[start_index:end_index])
+                image_video_patches.append(video_pixel_values[video_index])
                 video_index += 1
 
         if image_video_patches:
             model_inputs["pixel_values"] = concatenate_list(image_video_patches)
-        return BatchFeature(data=model_inputs, tensor_type=return_tensors)
+        return BatchFeature(
+            data=model_inputs, tensor_type=return_tensors, skip_tensor_conversion=self.skip_tensor_conversion
+        )
 
     def validate_inputs(
         self,
