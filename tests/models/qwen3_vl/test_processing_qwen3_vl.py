@@ -99,6 +99,19 @@ class Qwen3VLProcessorTest(ProcessorTesterMixin, unittest.TestCase):
         decoded = processor.decode(input_ids)
         self.assertRegex(decoded, r"^<\|im_start\|>user\n<\d+\.\d seconds><\|vision_start\|>")
 
+    def test_return_metadata_in_videos_kwargs(self):
+        processor = self.get_processor()
+        video = self.prepare_videos_inputs()
+        kwargs = {"text": f"Video: {self.video_token}", "videos": [video], "do_sample_frames": False}
+
+        default = processor(**kwargs)
+        flat = processor(**kwargs, return_metadata=True)
+        nested = processor(**kwargs, videos_kwargs={"return_metadata": True})
+
+        self.assertNotIn("video_metadata", default)
+        self.assertEqual(nested["video_metadata"], flat["video_metadata"])
+        self.assertEqual(nested["input_ids"], flat["input_ids"])
+
     def test_model_input_names(self):
         processor = self.get_processor()
 
