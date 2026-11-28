@@ -14,11 +14,14 @@
 
 import unittest
 
-from transformers.testing_utils import require_torch, require_torchvision, require_vision
-from transformers.utils import is_vision_available
+from transformers.testing_utils import require_torch, require_torchcodec, require_torchvision, require_vision
+from transformers.utils import is_torch_available, is_vision_available
 
-from ...test_processing_common import ProcessorTesterMixin
+from ...test_processing_common import ProcessorTesterMixin, url_to_local_path
 
+
+if is_torch_available():
+    import torch
 
 if is_vision_available():
     from transformers import Qwen3VLProcessor
@@ -119,6 +122,42 @@ class Qwen3VLProcessorTest(ProcessorTesterMixin, unittest.TestCase):
         self.assertEqual(inputs[self.images_input_name].shape[0], 612)
         inputs = processor(text=input_str, images=image_input, return_tensors="pt")
         self.assertEqual(inputs[self.images_input_name].shape[0], 100)
+
+    @require_torchcodec
+    def test_apply_chat_template_with_decoded_and_file_videos(self):
+        processor = self.get_processor()
+        path = url_to_local_path(
+            "https://huggingface.co/datasets/hf-internal-testing/test-videos/resolve/main/tiny_video_320x240.mp4"
+        )
+        video = torch.zeros((4, 3, 32, 32), dtype=torch.uint8)
+        conversations = [
+            [{"role": "user", "content": [source, {"type": "text", "text": "Describe this clip."}]}]
+            for source in ({"type": "video", "path": path}, {"type": "video", "video": video})
+        ]
+        kwargs = {
+            "tokenize": True,
+            "return_dict": True,
+            "return_tensors": "pt",
+            "processor_kwargs": {"fps": 1, "padding": True, "return_metadata": True},
+        }
+
+        singles = [processor.apply_chat_template(conversation, **kwargs) for conversation in conversations]
+
+        for order in ((0, 1), (1, 0)):
+            with self.subTest(order=order):
+                batch = processor.apply_chat_template([conversations[i] for i in order], **kwargs)
+                ordered = [singles[i] for i in order]
+                torch.testing.assert_close(
+                    batch.pixel_values_videos, torch.cat([sample.pixel_values_videos for sample in ordered])
+                )
+                for ids, mask, metadata, sample in zip(
+                    batch.input_ids, batch.attention_mask, batch.video_metadata, ordered
+                ):
+                    torch.testing.assert_close(ids[mask.bool()], sample.input_ids[0])
+                    torch.testing.assert_close(
+                        torch.as_tensor(metadata.frames_indices),
+                        torch.as_tensor(sample.video_metadata[0].frames_indices),
+                    )
 
     @unittest.skip("qwen3_vl can't sample frames from image frames directly, user can use `qwen-vl-utils`")
     def test_apply_chat_template_video_1(self):
